@@ -6,6 +6,8 @@ __pycache__/
 .agent/settings.local.json
 .agent/memory/
 .appa/runtime.db
+.appa/runtime.db-shm
+.appa/runtime.db-wal
 *.egg-info/
 dist/
 build/

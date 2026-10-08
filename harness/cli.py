@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     if ui:
         from harness.ui import serve
 
-        serve(lambda task, trace: _run_task(workspace, settings, task, trace=trace, echo=False), str(workspace), port)
+        serve(lambda task, trace, options=None: _ui_task(workspace, settings, task, trace, options or {}), str(workspace), port)
         return 0
     if args:
         task = " ".join(args).strip()
@@ -76,7 +76,18 @@ def _parse(argv: list[str]) -> tuple[bool, bool, int, list[str]]:
     return dev, ui, port, rest
 
 
-def _run_task(workspace: Path, settings, task: str, *, dev: bool = False, trace: Trace | None = None, echo: bool = True) -> int:
+def _run_task(
+    workspace: Path,
+    settings,
+    task: str,
+    *,
+    dev: bool = False,
+    trace: Trace | None = None,
+    echo: bool = True,
+    anthropic_api_key: str | None = None,
+    openappa: bool | None = None,
+    appa_url: str | None = None,
+) -> int:
     trace = trace or Trace(dev=dev)
     decisions = Decisions(
         TracingClient(
@@ -89,7 +100,7 @@ def _run_task(workspace: Path, settings, task: str, *, dev: bool = False, trace:
         ),
         settings.confidence_min,
     )
-    providers = Providers({"openai": OpenAIProvider(), "anthropic": AnthropicProvider()})
+    providers = Providers({"openai": OpenAIProvider(), "anthropic": AnthropicProvider(api_key=anthropic_api_key or None)})
     try:
         result = run(
             task,
@@ -101,7 +112,7 @@ def _run_task(workspace: Path, settings, task: str, *, dev: bool = False, trace:
             on_text=_write_chunk,
             echo=echo,
             trace=trace,
-            appa=_appa_session(),
+            appa=_appa_session(openappa, appa_url),
         )
     except HarnessError as exc:
         print(exc, file=sys.stderr)
@@ -114,8 +125,29 @@ def _run_task(workspace: Path, settings, task: str, *, dev: bool = False, trace:
     return 0
 
 
-def _appa_session() -> AppaSession | None:
-    url = os.environ.get("APPA_RUNTIME_URL", "").strip()
+def _ui_task(workspace: Path, settings, task: str, trace: Trace, options: dict) -> int:
+    key = str(options.get("anthropic_api_key") or "").strip() or None
+    return _run_task(
+        workspace,
+        settings,
+        task,
+        trace=trace,
+        echo=False,
+        anthropic_api_key=key,
+        openappa=bool(options.get("openappa")),
+        appa_url=str(options.get("appa_url") or "").strip() or None,
+    )
+
+
+def _appa_session(openappa: bool | None = None, appa_url: str | None = None) -> AppaSession | None:
+    """The command line follows APPA_RUNTIME_URL. The page follows its toggle."""
+    if openappa is False:
+        return None
+    url = (appa_url or os.environ.get("APPA_RUNTIME_URL", "")).strip()
+    if openappa is None and not url:
+        return None
+    if openappa and not url:
+        url = "http://127.0.0.1:8787"
     if not url:
         return None
     return AppaSession(AppaClient(url))

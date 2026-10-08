@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coding agent harness</title>
+<style>
+  :root {
+    --ink: #1c1915;
+    --paper: #f6f1e8;
+    --panel: #fffaf3;
+    --line: #e2d8c8;
+    --muted: #6f675c;
+    --accent: #b8431f;
+    --ok: #2f6b4f;
+    --live: #f3d2c4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 "Iowan Old Style", Palatino, Georgia, serif; color: var(--ink); background: var(--paper); }
+  header, main { padding: 20px 24px; }
+  header { border-bottom: 1px solid var(--line); }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  a { color: var(--accent); }
+  .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .controls, .samples, form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 14px; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+  .check { flex-direction: row; align-items: center; color: var(--ink); padding-bottom: 8px; }
+  input[type="password"], input[type="text"], textarea {
+    padding: 8px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit;
+  }
+  input[type="password"], input[type="text"] { min-width: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  textarea { flex: 1; min-height: 72px; min-width: 240px; }
+  button { background: var(--ink); color: var(--paper); border: 0; padding: 10px 16px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: 0.45; cursor: wait; }
+  .sample { background: var(--panel); color: var(--ink); border: 1px solid var(--line); padding: 6px 10px; text-align: left; font-size: 14px; }
+  .sample small { display: block; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .layout { display: grid; grid-template-columns: minmax(280px, 380px) 1fr 280px; gap: 16px; margin-top: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); padding: 14px; }
+  h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .node { border: 1px solid var(--line); background: var(--panel); padding: 7px 10px; margin-top: 6px; }
+  .node strong { display: block; }
+  .node span, .arrow { color: var(--muted); font-size: 13px; }
+  .node.visited { border-color: var(--ink); background: #efe6d6; }
+  .node.live { border-color: var(--accent); background: var(--live); }
+  #reply, #log, #files { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 180px; }
+  #log div, #files div { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  #log .kind { color: var(--accent); }
+  .status { color: var(--ok); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Coding agent harness</h1>
+  <p class="note">A browser playground for the workshop. Your Anthropic key stays in this tab and is sent only to <a href="https://api.anthropic.com">api.anthropic.com</a>. It is not stored in this repository. The workspace is memory in the page, so nothing here can run a shell or change your computer.</p>
+</header>
+<main>
+  <div class="controls">
+    <label>Anthropic API key
+      <input id="api-key" type="password" autocomplete="off" placeholder="sk-ant-...">
+    </label>
+    <label class="check"><input id="openappa" type="checkbox"> OpenAPPA for sub-agents</label>
+    <label>OpenAPPA URL
+      <input id="appa-url" type="text" value="http://127.0.0.1:8787" disabled>
+    </label>
+    <div class="status" id="status">Idle</div>
+  </div>
+  <p class="note">OpenAPPA is off until you check the box. A public page cannot reach a runtime on your computer, so turning it on refuses the spawn unless that URL accepts this site.</p>
+  <div class="samples" id="samples"></div>
+  <form id="form">
+    <label for="task" style="position:absolute;left:-999px">Task</label>
+    <textarea id="task" placeholder="What should the agent do?"></textarea>
+    <button id="run" type="submit">Run</button>
+  </form>
+  <div class="layout">
+    <section>
+      <h2>Loop</h2>
+      <div id="map">
+        <div class="node" data-stage="user"><strong>User task</strong><span>this page</span></div>
+        <div class="node" data-stage="model"><strong>Language model</strong><span>your Anthropic key</span></div>
+        <div class="node" data-stage="tools"><strong>Tools</strong><span>in-memory files</span></div>
+        <div class="node" data-stage="openjev"><strong>OpenAPPA</strong><span>only if the toggle is on</span></div>
+        <div class="node" data-stage="stop"><strong>Stop</strong><span>final reply</span></div>
+      </div>
+    </section>
+    <section>
+      <h2>Reply</h2>
+      <div id="reply"></div>
+      <h2 style="margin-top:16px">Developer log</h2>
+      <div id="log"></div>
+    </section>
+    <section>
+      <h2>Workspace</h2>
+      <div id="files"></div>
+    </section>
+  </div>
+</main>
+<script>
+const MODEL = "claude-sonnet-5-5";
+const SYSTEM = "You are a coding agent in a browser playground. You can read_file, edit_file, write_file, grep, glob, write_note, and spawn_agent. There is no shell. Files live only in this page. Read a file before you edit or overwrite it. When the task is finished, reply with no tool calls.";
+const TOOLS = [
+  toolSpec("read_file", "Read a workspace file.", {path: {type: "string"}}, ["path"]),
+  toolSpec("edit_file", "Replace one exact occurrence. The file must have been read first.", {path: {type: "string"}, old_string: {type: "string"}, new_string: {type: "string"}}, ["path", "old_string", "new_string"]),
+  toolSpec("write_file", "Create or replace a file. An existing file must have been read first.", {path: {type: "string"}, content: {type: "string"}}, ["path", "content"]),
+  toolSpec("grep", "Search file contents.", {pattern: {type: "string"}}, ["pattern"]),
+  toolSpec("glob", "List files by a simple pattern.", {pattern: {type: "string"}}, ["pattern"]),
+  toolSpec("write_note", "Save a note that survives later turns in this tab.", {name: {type: "string"}, content: {type: "string"}}, ["name", "content"]),
+  toolSpec("spawn_agent", "Investigate in a fresh conversation. Only the summary returns.", {task: {type: "string"}}, ["task"])
+];
+const SEED = {
+  "demo-task/calc.py": "def add(a, b):\n    return a + b\n",
+  "demo-task/test_calc.py": "def test_add():\n    assert add(2, 3) == 5\n",
+  "harness/tools/notes.py": "def write_note(name, content):\n    \"\"\"Write a note under .agent/memory so it survives beyond this session.\"\"\"\n    return f\".agent/memory/{name}.md\"\n",
+  "harness/tools/spawn.py": "def spawn_agent(task):\n    \"\"\"Start a fresh loop. Only the summary returns to the parent.\"\"\"\n    return summary\n",
+  "harness/decisions.py": "def should_spawn(task):\n    \"\"\"OpenJev decides whether the investigation is large enough to isolate.\"\"\"\n    return False\n",
+  "harness/loop.py": "def run(task):\n    \"\"\"Own the loop. A sub-agent is another run whose summary is checked before it returns.\"\"\"\n    return summary\n"
+};
+
+const samples = [
+  ["Search", "glob, grep, read", "Do not change files. Glob for *.py, grep for write_note, then read harness/tools/notes.py and quote the description."],
+  ["Edit a file", "read, edit", "Read demo-task/calc.py. Add a function mul(a, b) that returns a * b, using edit_file. Then read the file again and show it."],
+  ["Write a file", "write_file", "Create demo-task/greeting.txt containing exactly this line: hello from the harness. Do not change other files."],
+  ["Save a note", "write_note", "Use write_note to save a note named tour. The content should be: OpenJev chooses, the model writes. Then stop."],
+  ["Sub-agent", "spawn_agent", "Use spawn_agent to read harness/loop.py, harness/decisions.py, and harness/tools/spawn.py and explain how a sub-agent returns. Report only the summary. If OpenAPPA refuses, say so."]
+];
+
+const keyBox = document.getElementById("api-key");
+const openappa = document.getElementById("openappa");
+const appaUrl = document.getElementById("appa-url");
+const taskBox = document.getElementById("task");
+const button = document.getElementById("run");
+const reply = document.getElementById("reply");
+const log = document.getElementById("log");
+const status = document.getElementById("status");
+const filesView = document.getElementById("files");
+let workspace = {};
+let reads = new Set();
+let notes = {};
+let busy = false;
+
+keyBox.value = sessionStorage.getItem("anthropic-key") || "";
+keyBox.addEventListener("change", () => sessionStorage.setItem("anthropic-key", keyBox.value.trim()));
+openappa.addEventListener("change", () => { appaUrl.disabled = !openappa.checked; });
+
+for (const [name, detail, task] of samples) {
+  const sample = document.createElement("button");
+  sample.type = "button";
+  sample.className = "sample";
+  sample.innerHTML = name + "<small>" + detail + "</small>";
+  sample.addEventListener("click", () => {
+    if (busy) return;
+    taskBox.value = task;
+    document.getElementById("form").requestSubmit();
+  });
+  document.getElementById("samples").appendChild(sample);
+}
+
+function toolSpec(name, description, properties, required) {
+  return {name, description, input_schema: {type: "object", properties, required}};
+}
+
+function resetWorkspace() {
+  workspace = Object.assign({}, SEED);
+  reads = new Set();
+  notes = {};
+  renderFiles();
+}
+
+function renderFiles() {
+  filesView.textContent = "";
+  const names = Object.keys(workspace).sort();
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.textContent = name + "\n" + workspace[name];
+    filesView.appendChild(row);
+  }
+  for (const name of Object.keys(notes)) {
+    const row = document.createElement("div");
+    row.textContent = ".agent/memory/" + name + ".md\n" + notes[name];
+    filesView.appendChild(row);
+  }
+}
+
+function mark(stage) {
+  for (const node of document.querySelectorAll("#map .node")) node.classList.remove("live");
+  const node = document.querySelector('#map .node[data-stage="' + stage + '"]');
+  if (node) node.classList.add("live", "visited");
+}
+
+function resetMap() {
+  for (const node of document.querySelectorAll("#map .node")) node.classList.remove("live", "visited");
+}
+
+function logLine(kind, message) {
+  const row = document.createElement("div");
+  const label = document.createElement("span");
+  label.className = "kind";
+  label.textContent = kind + "  ";
+  row.append(label, document.createTextNode(message));
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function runTool(name, input, child) {
+  if (name === "read_file") {
+    const path = String(input.path || "");
+    if (!(path in workspace)) return "Error: no such file " + path;
+    reads.add(path);
+    return workspace[path];
+  }
+  if (name === "edit_file") {
+    const path = String(input.path || "");
+    if (!reads.has(path)) return "Error: read the file before editing it";
+    const body = workspace[path];
+    if (body == null) return "Error: no such file " + path;
+    const oldText = String(input.old_string ?? "");
+    const count = body.split(oldText).length - 1;
+    if (count !== 1) return "Error: old_string matched " + count + " times";
+    workspace[path] = body.replace(oldText, String(input.new_string ?? ""));
+    renderFiles();
+    return "Edited " + path;
+  }
+  if (name === "write_file") {
+    const path = String(input.path || "");
+    if (path in workspace && !reads.has(path)) return "Error: read the existing file before replacing it";
+    workspace[path] = String(input.content ?? "");
+    reads.add(path);
+    renderFiles();
+    return "Wrote " + path;
+  }
+  if (name === "grep") {
+    const pattern = String(input.pattern || "");
+    let expression;
+    try { expression = new RegExp(pattern); } catch (error) { return "Error: " + error.message; }
+    const lines = [];
+    for (const path of Object.keys(workspace).sort()) {
+      workspace[path].split("\n").forEach((line, index) => {
+        if (expression.test(line)) lines.push(path + ":" + (index + 1) + ":" + line);
+      });
+    }
+    return lines.join("\n") || "No matches";
+  }
+  if (name === "glob") {
+    const pattern = String(input.pattern || "*").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    const expression = new RegExp("^" + pattern + "$");
+    return Object.keys(workspace).filter((path) => expression.test(path) || expression.test(path.split("/").pop())).sort().join("\n") || "No files";
+  }
+  if (name === "write_note") {
+    const note = String(input.name || "");
+    if (!/^[A-Za-z0-9._-]{1,80}$/.test(note)) return "Error: name must be a short file-safe token";
+    notes[note] = String(input.content ?? "");
+    renderFiles();
+    return "Wrote .agent/memory/" + note + ".md";
+  }
+  if (name === "spawn_agent") {
+    if (child) return "Error: a sub-agent cannot spawn another";
+    return {spawn: String(input.task || "")};
+  }
+  return "Error: unknown tool " + name;
+}
+
+async function anthropic(apiKey, messages, tools, onText) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({model: MODEL, max_tokens: 2048, system: SYSTEM, messages, tools, stream: true})
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error("Anthropic returned " + response.status + ". " + detail.slice(0, 280));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const blocks = [];
+  let current = null;
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, {stream: true});
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop();
+    for (const part of parts) {
+      const data = part.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
+      if (!data || data === "[DONE]") continue;
+      const event = JSON.parse(data);
+      if (event.type === "content_block_start") {
+        current = Object.assign({}, event.content_block, {inputJson: ""});
+        blocks.push(current);
+      } else if (event.type === "content_block_delta" && current) {
+        if (event.delta.type === "text_delta") {
+          current.text = (current.text || "") + event.delta.text;
+          onText(event.delta.text);
+        } else if (event.delta.type === "input_json_delta") {
+          current.inputJson += event.delta.partial_json;
+        }
+      }
+    }
+  }
+  return blocks.map((block) => {
+    if (block.type === "tool_use") {
+      let input = {};
+      try { input = JSON.parse(block.inputJson || "{}"); } catch (error) { input = {}; }
+      return {type: "tool_use", id: block.id, name: block.name, input};
+    }
+    return {type: "text", text: block.text || ""};
+  });
+}
+
+async function agent(apiKey, task, child, onText) {
+  const messages = [{role: "user", content: task}];
+  const tools = child ? TOOLS.filter((item) => item.name !== "spawn_agent") : TOOLS;
+  let finalText = "";
+  for (let turn = 0; turn < (child ? 4 : 8); turn += 1) {
+    mark("model");
+    logLine("model", (child ? "sub-agent " : "") + "turn " + (turn + 1));
+    const blocks = await anthropic(apiKey, messages, tools, child ? () => {} : onText);
+    const calls = blocks.filter((block) => block.type === "tool_use");
+    finalText = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+    if (!calls.length) break;
+    mark("tools");
+    const results = [];
+    for (const call of calls) {
+      logLine("tool", call.name);
+      let output = runTool(call.name, call.input, child);
+      if (output && output.spawn) output = await spawn(apiKey, output.spawn);
+      results.push({type: "tool_result", tool_use_id: call.id, content: String(output)});
+      logLine("tool", call.name + " -> " + String(output).slice(0, 160));
+    }
+    messages.push({role: "assistant", content: blocks});
+    messages.push({role: "user", content: results});
+  }
+  return finalText.trim();
+}
+
+async function spawn(apiKey, task) {
+  if (!openappa.checked) return agent(apiKey, task, true, () => {});
+  mark("openjev");
+  const root = crypto.randomUUID().replace(/-/g, "");
+  try {
+    await hook(root, {
+      event: "session_start",
+      inventory: {
+        tools: ["Agent", "Read", "Edit", "Write", "Bash", "Grep", "Glob"].map((name) => ({name, tool: name})),
+        sources: [{server: "builtin", status: "complete", dynamic: false}]
+      }
+    });
+    const released = await hook(root, {event: "tool_call", tool: "Agent", arguments: {task}, call_id: "spawn-1"});
+    if (released.decision !== "allow_call" || !released.spawn_binding) {
+      return "OpenAPPA did not release the sub-agent. " + (released.feedback || released.reason || released.detail || released.decision || "");
+    }
+    const started = await hook(root, {event: "child_start", child_id: "sub-1", spawn_binding: released.spawn_binding});
+    if (started.decision === "refuse") return "OpenAPPA refused the sub-agent. " + (started.detail || "");
+    const summary = await agent(apiKey, task, true, () => {});
+    const ended = await hook(root, {event: "child_end", child_id: "sub-1", value: summary});
+    if (ended.decision === "block") return "OpenAPPA withheld the sub-agent summary. " + (ended.reason || "");
+    const delivered = ended.decision === "child_return" && ended.value != null ? ended.value : summary;
+    const reported = await hook(root, {
+      event: "spawn_result",
+      tool: "Agent",
+      arguments: {task},
+      call_id: "spawn-1",
+      spawned_id: "sub-1",
+      value: delivered,
+      outcome: {status: "success", body: delivered}
+    });
+    if (reported.decision === "block") return "OpenAPPA withheld the sub-agent summary. " + (reported.reason || "");
+    if (reported.decision === "deliver_value" && reported.value != null) return reported.value;
+    return delivered;
+  } catch (error) {
+    return "OpenAPPA did not answer, so the sub-agent did not start. " + error.message;
+  }
+}
+
+async function hook(root, fields) {
+  const base = appaUrl.value.trim().replace(/\/$/, "");
+  const response = await fetch(base + "/hook", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(Object.assign({protocol: 1, adapter: "claude-code", root_id: root}, fields))
+  });
+  if (!response.ok) throw new Error("runtime returned " + response.status);
+  return response.json();
+}
+
+document.getElementById("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const task = taskBox.value.trim();
+  const apiKey = keyBox.value.trim();
+  if (!task || busy) return;
+  if (!apiKey) {
+    status.textContent = "Enter your Anthropic API key";
+    return;
+  }
+  sessionStorage.setItem("anthropic-key", apiKey);
+  busy = true;
+  button.disabled = true;
+  reply.textContent = "";
+  log.textContent = "";
+  resetMap();
+  resetWorkspace();
+  status.textContent = "Running";
+  mark("user");
+  logLine("user", task);
+  try {
+    const text = await agent(apiKey, task, false, (chunk) => { reply.textContent += chunk; });
+    if (!reply.textContent) reply.textContent = text;
+    mark("stop");
+    status.textContent = "Stopped";
+    logLine("stop", "completed");
+  } catch (error) {
+    status.textContent = "Stopped";
+    logLine("stop", error.message);
+    mark("stop");
+  } finally {
+    busy = false;
+    button.disabled = false;
+    renderFiles();
+  }
+});
+
+resetWorkspace();
+</script>
+</body>
+</html>

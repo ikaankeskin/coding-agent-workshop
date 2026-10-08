@@ -40,3 +40,7 @@ delta = {}
 
 [policy.deployment]
 context_control = true
+
+[externals]
+timeout_ms = 5000
+max_body_bytes = 65536

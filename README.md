@@ -17,7 +17,7 @@ The model never touches the filesystem or the shell itself. Every action goes th
 - **Notes.** `write_note` stores markdown under `.agent/memory/`, outside the context window.
 - **Hooks.** Shell commands from settings can run before a tool, after a tool, and when the agent stops. A failing pre-tool hook blocks the tool. Post-tool stdout is appended to the tool result.
 - **Sub-agents.** `spawn_agent` starts a fresh loop with its own context and a lower turn cap. Only the final summary returns. A sub-agent cannot spawn another. OpenJev must agree the investigation is worth isolating. If it is unsure, the work stays in the main conversation.
-- **OpenAPPA.** When `APPA_RUNTIME_URL` is set, a sub-agent also has to pass an [OpenAPPA](https://www.openappa.com/) runtime: the spawn is released, the child's tool calls are checked, and the summary is checked again before the parent can read it. If the runtime does not answer, the spawn is refused.
+- **OpenAPPA.** Optional. The browser page and the local UI leave it off until you check **OpenAPPA for sub-agents**. The command line turns it on only when `APPA_RUNTIME_URL` is set. A sub-agent then has to pass an [OpenAPPA](https://www.openappa.com/) runtime: the spawn is released, the child's tool calls are checked, and the summary is checked again before the parent can read it. If the runtime does not answer, the spawn is refused.
 - **Stop conditions.** The model stops and OpenJev agrees, one continuation has already been used, the turn cap is hit (30 by default, 12 in the committed project settings, lower for a sub-agent), the user interrupts, or compression still cannot fit.
 - **Layered settings.** Later layers replace earlier ones.
 - **Developer trace and a local page.** `--dev` prints each step. `--ui` shows the same events on a live architecture map.
@@ -98,6 +98,18 @@ Settings load in this order, and later layers win:
 4. `.agent/settings.local.json` (gitignored)
 5. Environment variables
 
+## Play in the browser
+
+The published page is [ikaankeskin.github.io/coding-agent-workshop](https://ikaankeskin.github.io/coding-agent-workshop/).
+
+Paste your own Anthropic API key there. The key stays in that browser tab and is sent only to `api.anthropic.com`. It is not saved in this repository and it is not sent to OpenJev or OpenAPPA.
+
+The page keeps a small workspace in memory. It can read, edit, write, search, save a note, and spawn a sub-agent. It cannot run a shell or change files on your computer.
+
+OpenAPPA is off until you check **OpenAPPA for sub-agents**. The same toggle is on the local page from `python -m harness --ui`. Checking it asks the runtime at the URL in the box, which defaults to `http://127.0.0.1:8787`. Leaving it unchecked skips OpenAPPA even if `APPA_RUNTIME_URL` is set. A GitHub Pages site cannot call a runtime on your own computer, so the public page refuses the spawn when that call does not succeed. The local page can reach a runtime you started yourself.
+
+The local page also has an API key box. If you leave it empty, the server uses `ANTHROPIC_API_KEY` from the environment. A key typed into the page is used for that run only and is not written to disk.
+
 ## Run
 
 From the repository root:
@@ -163,10 +175,16 @@ Hooks cost no tokens. A pre-tool command that exits non-zero, or times out, bloc
 
 OpenJev sees the user's request and the investigation. A one-file lookup is often too small for it to isolate with confidence. A larger reading, such as the spawn path under `harness/`, is the kind of task the **Sub-agent** sample uses.
 
-OpenAPPA is optional and separate from OpenJev. Install the [OpenAPPA](https://github.com/archestra-ai/OpenAPPA) runtime, then:
+OpenAPPA is optional and separate from OpenJev. It is not the `appa` package on PyPI. That package is unrelated. Install the runtime binary:
 
 ```sh
-appa runtime --config .appa/policy.toml --db .appa/runtime.db --listen 127.0.0.1:8787
+curl -fsSL https://openappa.com/install.sh | sh
+```
+
+The binary lands in `~/.local/bin`. If that directory is not on your `PATH`, call it by its full path. Then start it from this repository. The space after `--db` is required:
+
+```sh
+~/.local/bin/appa runtime --config .appa/policy.toml --db .appa/runtime.db --listen 127.0.0.1:8787
 ```
 
 Set `APPA_RUNTIME_URL=http://127.0.0.1:8787` before starting the harness. `.appa/policy.toml` declares the spawn and the child's read, edit, write, bash, grep, and glob calls. The runtime database is gitignored.

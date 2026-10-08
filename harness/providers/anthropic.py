@@ -7,12 +7,13 @@ from harness.providers.translate import anthropic_payload, anthropic_tools
 
 
 class AnthropicProvider:
-    def __init__(self, client=None, max_tokens: int = 8192):
+    def __init__(self, client=None, max_tokens: int = 8192, api_key: str | None = None):
         self._client = client
         self.max_tokens = max_tokens
+        self._api_key = api_key or None
 
     def stream(self, messages, tools, model: str, on_text) -> Completion:
-        client = self._client if self._client is not None else _sdk_client()
+        client = self._client if self._client is not None else _sdk_client(self._api_key)
         system, payload = anthropic_payload(messages)
         kwargs = {
             "model": model,
@@ -39,9 +40,11 @@ class AnthropicProvider:
         return Completion(Message("assistant", "".join(content), calls or None), input_tokens)
 
 
-def _sdk_client():
+def _sdk_client(api_key: str | None = None):
     try:
         from anthropic import Anthropic
     except ImportError as exc:
         raise RuntimeError("The anthropic package is not installed.") from exc
+    if api_key:
+        return Anthropic(api_key=api_key)
     return Anthropic()

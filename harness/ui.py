@@ -58,6 +58,17 @@ PAGE = """<!DOCTYPE html>
     cursor: pointer;
   }
   button:disabled { opacity: 0.45; cursor: wait; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 14px; }
+  .controls label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+  .controls input[type="password"], .controls input[type="text"] {
+    min-width: 240px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .controls .check { flex-direction: row; align-items: center; color: var(--ink); padding-bottom: 8px; }
   .samples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .sample {
     background: var(--panel);
@@ -142,6 +153,16 @@ PAGE = """<!DOCTYPE html>
 </header>
 <main>
   <div id="panel-run">
+  <div class="controls">
+    <label>Anthropic API key
+      <input id="api-key" type="password" autocomplete="off" placeholder="Uses the server environment if empty">
+    </label>
+    <label class="check"><input id="openappa" type="checkbox"> OpenAPPA for sub-agents</label>
+    <label>OpenAPPA URL
+      <input id="appa-url" type="text" value="http://127.0.0.1:8787" disabled>
+    </label>
+  </div>
+  <p class="note">The key is sent only to this local server for the run. It is not written to disk. OpenAPPA stays off until the box is checked.</p>
   <div class="samples" id="samples"></div>
   <form id="form">
     <label for="task" style="position:absolute;left:-999px">Task</label>
@@ -280,6 +301,9 @@ const reply = document.getElementById("reply");
 const log = document.getElementById("log");
 const status = document.getElementById("status");
 const button = document.getElementById("run");
+const openappa = document.getElementById("openappa");
+const appaUrl = document.getElementById("appa-url");
+openappa.addEventListener("change", () => { appaUrl.disabled = !openappa.checked; });
 document.getElementById("workspace").textContent = "__WORKSPACE__";
 
 function mark(stage) {
@@ -362,7 +386,12 @@ document.getElementById("form").addEventListener("submit", async (event) => {
   const response = await fetch("/run", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({task})
+    body: JSON.stringify({
+      task,
+      anthropic_api_key: document.getElementById("api-key").value.trim(),
+      openappa: openappa.checked,
+      appa_url: appaUrl.value.trim()
+    })
   });
   if (!response.ok) {
     status.textContent = await response.text();
@@ -432,7 +461,12 @@ def serve(run_task, workspace: str, port: int = 8765) -> None:
                 return
             hub.running = True
             hub.publish({"kind": "run", "stage": "user", "message": task, "fields": {}})
-            threading.Thread(target=_run, args=(run_task, hub, task), daemon=True).start()
+            options = {
+                "anthropic_api_key": str(payload.get("anthropic_api_key") or ""),
+                "openappa": bool(payload.get("openappa")),
+                "appa_url": str(payload.get("appa_url") or ""),
+            }
+            threading.Thread(target=_run, args=(run_task, hub, task, options), daemon=True).start()
             self._send(202, "text/plain; charset=utf-8", b"started")
 
         def _events(self):
@@ -466,12 +500,17 @@ def serve(run_task, workspace: str, port: int = 8765) -> None:
     server.serve_forever()
 
 
-def _run(run_task, hub: Hub, task: str) -> None:
+def _run(run_task, hub: Hub, task: str, options: dict | None = None) -> None:
     trace = Trace(dev=True)
     trace.listeners.append(hub.publish)
+    options = options or {}
     try:
-        run_task(task, trace)
+        run_task(task, trace, options)
     except Exception as exc:
-        hub.publish({"kind": "stop", "stage": "stop", "message": str(exc), "fields": {}})
+        message = str(exc)
+        key = str(options.get("anthropic_api_key") or "")
+        if key:
+            message = message.replace(key, "[redacted]")
+        hub.publish({"kind": "stop", "stage": "stop", "message": message, "fields": {}})
     finally:
         hub.running = False
