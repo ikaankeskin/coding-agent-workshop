@@ -1,0 +1,42 @@
+# OpenAPPA policy for this harness. Start the runtime with:
+#   appa runtime --config .appa/policy.toml --db .appa/runtime.db --listen 127.0.0.1:8787
+# then set APPA_RUNTIME_URL=http://127.0.0.1:8787
+#
+# The harness reports spawn_agent as Claude Code's Agent tool, and the
+# child's read, edit, write, bash, grep, and glob calls under those names.
+# A sub-agent starts only after this policy releases that spawn, and its
+# summary is checked again before the parent can read it.
+
+[policy]
+version = 2
+
+[[policy.tool]]
+name = "host/claude-code/Agent"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Read"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Edit"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Write"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Bash"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Grep"
+delta = {}
+
+[[policy.tool]]
+name = "host/claude-code/Glob"
+delta = {}
+
+[policy.deployment]
+context_control = true

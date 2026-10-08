@@ -1,0 +1,26 @@
+{
+  "default_model": "sonnet",
+  "context_limit": 100000,
+  "max_turns": 8,
+  "models": [
+    {
+      "id": "haiku",
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "context_limit": 200000,
+      "notes": "Fast model for short lookups, search, and summaries."
+    },
+    {
+      "id": "sonnet",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "context_limit": 200000,
+      "notes": "Stronger model for reading code, editing files, and fixing tests."
+    }
+  ],
+  "permissions": {
+    "allow_tools": ["edit_file", "write_file"],
+    "allow_patterns": ["unittest"],
+    "deny_patterns": ["rm -rf"]
+  }
+}
